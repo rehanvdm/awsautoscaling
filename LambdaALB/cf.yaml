@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: An example CloudFormation template for Lambda fronted by ALB.
+Parameters:
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Default: "vpc-XXXXXXX"
+  SubnetA:
+    Type: AWS::EC2::Subnet::Id
+    Default: "subnet-XXXXXXX"
+  SubnetB:
+    Type: AWS::EC2::Subnet::Id
+    Default: "subnet-XXXXXXX"
+
+  ServiceName:
+    Type: String
+    Default: "ALBLambda"
+
+
+Resources:
+
+  ApiLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ['${ser}-lambda', { ser: !Ref ServiceName} ]
+      Runtime: nodejs8.10
+      CodeUri: app/
+      Timeout: 10
+      Handler: index.handler
+      InlineCode: |
+        exports.handler = async (event, context) =>
+        {
+            console.log(event);
+            return {
+                statusCode: 200,
+                headers: { "Content-Type": "text/html" },
+                body: "Reauest IP: " + event.headers["x-forwarded-for"],
+            };
+        }
+
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Join ['', [!Ref ServiceName, 'LoadBalancerSecurityGroup']]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join ['', [!Ref ServiceName, "LoadBalancer"]]
+      Type: "application"
+      Scheme: "internet-facing"
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: ApiLambdaFunctionInvokePermission
+    Properties:
+      Name: !Join ['', [!Ref ServiceName, "TargetGroup"]]
+      TargetType: lambda
+      Targets:
+        - Id: !GetAtt ApiLambdaFunction.Arn
+
+  ListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroup
+      - LoadBalancer
+    Properties:
+      Protocol: "HTTP"
+      Port: 80
+      LoadBalancerArn: !Ref LoadBalancer
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup
+
+  ApiLambdaFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt ApiLambdaFunction.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: elasticloadbalancing.amazonaws.com
+
+
+Outputs:
+  Endpoint:
+    Description: Endpoint
+    Value: !GetAtt LoadBalancer.DNSName

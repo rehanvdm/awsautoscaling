@@ -1,0 +1,12 @@
+{
+  "name": "elasticbeanstalk",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "aws --profile rehan cloudformation deploy --template-file cf.yaml --stack-name elastic-beanstalk-auto-scaling",
+    "describe_stack": "aws --profile rehan cloudformation  describe-stacks --stack-name elastic-beanstalk-auto-scaling --output table"
+  },
+  "author": "",
+  "license": "ISC"
+}

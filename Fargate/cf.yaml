@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: An example CloudFormation template for Fargate Autoscaling.
+Parameters:
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Default: "vpc-XXXXXXX"
+  SubnetA:
+    Type: AWS::EC2::Subnet::Id
+    Default: "subnet-XXXXXXX"
+  SubnetB:
+    Type: AWS::EC2::Subnet::Id
+    Default: "subnet-XXXXXXX"
+  Image:
+    Type: String
+    Default: "dockerhubrehan/fargateapp:v1"
+  ServiceName:
+    Type: String
+    Default: "MyFargateService"
+  ContainerPort:
+    Type: Number
+    Default: 80
+  HealthCheckPath:
+    Type: String
+    Default: "/"
+  MinContainers:
+    Type: Number
+    Default: 2
+  MaxContainers:
+    Type: Number
+    Default: 10
+  AutoScalingTargetValue:
+    Type: Number
+    Default: 30
+
+Resources:
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Join ['', [!Ref ServiceName, "Cluster"]]
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['', [/ecs/, !Ref ServiceName, TaskDefinition]]
+
+  # A role needed by ECS
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref ServiceName, 'ExecutionRole']]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+
+  # A role for the containers
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref ServiceName, 'TaskRole']]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+
+  # A role aoutoscaling needs to change desired count and other ecs related cluster actions
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Join ['', [!Ref ServiceName, 'AutoScalingRole']]
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole'
+
+  # Security Groups
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Join ['', [!Ref ServiceName, 'LoadBalancerSecurityGroup']]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: LoadBalancerSecurityGroup
+    Properties:
+      GroupDescription: !Join ['', [!Ref ServiceName, 'ContainerSecurityGroup']]
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+
+  # Load balancer things
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join ['', [!Ref ServiceName, "LoadBalancer"]]
+      Type: "application"
+      Scheme: "internet-facing"
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Join ['', [!Ref ServiceName, "TargetGroup"]]
+      HealthCheckIntervalSeconds: 10
+      HealthCheckTimeoutSeconds: 7
+      HealthCheckPath: !Ref HealthCheckPath # Healthy if 200 response on this path
+      UnhealthyThresholdCount: 2 # How many health check needs to fail for the target is marked unhealthy
+      HealthyThresholdCount: 2 # How many health check needs to success for the target to be marked as healthy
+      Port: !Ref ContainerPort
+      Protocol: "HTTP"
+      TargetGroupAttributes:
+        # This is also where you define stickiness
+        - Key: deregistration_delay.timeout_seconds # Time to wait to transition from DRAINING to UNUSED
+          Value: 60 # Default 300
+      TargetType: "ip"
+      VpcId: !Ref VPC
+
+  ListenerHTTP: # Connects the Load Balancer to a Target Group
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - TargetGroup
+      - LoadBalancer
+    Properties:
+      Protocol: "HTTP"
+      Port: 80
+      LoadBalancerArn: !Ref LoadBalancer
+      DefaultActions:
+        - Type: "forward"
+          TargetGroupArn: !Ref TargetGroup
+
+
+  # Actual Fargate definitions
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn: LogGroup
+    Properties:
+      Family: !Join ['', [!Ref ServiceName, "TaskDefinition"]] # Subsequent versions of the task definition are grouped together under this name.
+      NetworkMode: "awsvpc"
+      RequiresCompatibilities:
+        - FARGATE
+      # -> 256 (.25 vCPU) - Available memory values: 0.5GB, 1GB, 2GB
+      # 512 (.5 vCPU) - Available memory values: 1GB, 2GB, 3GB, 4GB
+      # 1024 (1 vCPU) - Available memory values: 2GB, 3GB, 4GB, 5GB, 6GB, 7GB, 8GB
+      # 2048 (2 vCPU) - Available memory values: Between 4GB and 16GB in 1GB increments
+      # 4096 (4 vCPU) - Available memory values: Between 8GB and 30GB in 1GB increments
+      Cpu: 256
+      Memory: 0.5GB
+      # Roles needed by ECS.
+      ExecutionRoleArn: !Ref ExecutionRole
+      TaskRoleArn: !Ref TaskRole
+      ContainerDefinitions:
+        - Name: !Ref ServiceName
+          Image: !Ref Image
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+          LogConfiguration:
+            LogDriver: "awslogs"
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: "ecs"
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - Cluster
+      - ListenerHTTP
+      - ContainerSecurityGroup
+    Properties:
+      LaunchType: FARGATE
+      ServiceName: !Ref ServiceName
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref MinContainers
+      # This may need to be adjusted if the container takes a while to start up
+      HealthCheckGracePeriodSeconds: 120
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref SubnetA
+            - !Ref SubnetB
+          SecurityGroups:
+            - !Ref ContainerSecurityGroup
+      LoadBalancers:
+        - ContainerName: !Ref ServiceName # Must be same as in Container Definition
+          ContainerPort: !Ref ContainerPort # Must be in the Container Definition
+          TargetGroupArn: !Ref TargetGroup
+
+
+  # The autoscaling party
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn:
+      - AutoScalingRole
+      - Cluster
+    Properties:
+      MinCapacity: !Ref MinContainers
+      MaxCapacity: !Ref MaxContainers
+      ResourceId: !Join ['/', [service, !Ref Cluster, !GetAtt Service.Name]]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !GetAtt AutoScalingRole.Arn
+
+  AutoScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Join ['', [!Ref ServiceName, "AutoScalingPolicy"]]
+      PolicyType: "TargetTrackingScaling"
+      ScalingTargetId: !Ref AutoScalingTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        ScaleInCooldown: 15 # Amount of time before another scale cool down operation can happen
+        ScaleOutCooldown: 15 # Amount of time before another scale up operation can happen
+        TargetValue: !Ref AutoScalingTargetValue
+
+Outputs:
+  Endpoint:
+    Description: Endpoint
+    Value: !GetAtt LoadBalancer.DNSName

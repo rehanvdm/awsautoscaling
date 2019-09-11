@@ -1,0 +1,84 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  sampleApplication:
+    Type: AWS::ElasticBeanstalk::Application
+    Properties:
+      Description: AWS Elastic Beanstalk HA Setup example
+
+  sampleConfigurationTemplate:
+    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
+    Properties:
+      ApplicationName:
+        Ref: sampleApplication
+      Description: AWS ElasticBeanstalk Sample Configuration Template
+      SolutionStackName: 64bit Amazon Linux 2018.03 v2.8.12 running PHP 7.2
+      OptionSettings:
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: InstanceType
+          Value: t2.nano
+        - Namespace: aws:elasticbeanstalk:environment
+          OptionName: EnvironmentType
+          Value: LoadBalanced
+        - Namespace: aws:elasticbeanstalk:environment:process:default
+          OptionName: StickinessEnabled
+          Value: 'true'
+        - Namespace: aws:autoscaling:asg
+          OptionName: MinSize
+          Value: 2
+        - Namespace: aws:autoscaling:asg
+          OptionName: MaxSize
+          Value: 5
+        - Namespace: aws:autoscaling:launchconfiguration
+          OptionName: MonitoringInterval
+          Value: '1 minute'
+        - Namespace: aws:autoscaling:asg
+          OptionName: Cooldown
+          Value: 30
+        - Namespace: aws:autoscaling:trigger
+          OptionName: MeasureName
+          Value: CPUUtilization
+        - Namespace: aws:autoscaling:trigger
+          OptionName: Statistic
+          Value: Average
+        - Namespace: aws:autoscaling:trigger
+          OptionName: Unit
+          Value: Percent
+        - Namespace: aws:autoscaling:trigger
+          OptionName: Period
+          Value: 1
+        - Namespace: aws:autoscaling:trigger
+          OptionName: EvaluationPeriods
+          Value: 2
+        - Namespace: aws:autoscaling:trigger
+          OptionName: LowerThreshold
+          Value: 15
+        - Namespace: aws:autoscaling:trigger
+          OptionName: UpperThreshold
+          Value: 50
+        - Namespace: aws:autoscaling:trigger
+          OptionName: LowerBreachScaleIncrement
+          Value: '-1'
+        - Namespace: aws:autoscaling:trigger
+          OptionName: UpperBreachScaleIncrement
+          Value: '1'
+
+  sampleApplicationVersion:
+    Type: AWS::ElasticBeanstalk::ApplicationVersion
+    Properties:
+      ApplicationName:
+        Ref: sampleApplication
+      Description: AWS ElasticBeanstalk Sample Application Version
+      SourceBundle:
+        S3Bucket: "auto-scaling-app"
+        S3Key: "eb-app/app.zip"
+
+  sampleEnvironment:
+    Type: AWS::ElasticBeanstalk::Environment
+    Properties:
+      ApplicationName:
+        Ref: sampleApplication
+      Description: AWS ElasticBeanstalk Sample Environment
+      TemplateName:
+        Ref: sampleConfigurationTemplate
+      VersionLabel:
+        Ref: sampleApplicationVersion

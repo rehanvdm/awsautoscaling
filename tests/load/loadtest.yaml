@@ -1,0 +1,9 @@
+config:
+  target: 'http://XXXXXXXXXXXXX.com'
+  phases:
+    - duration: 600
+      arrivalRate: 4
+scenarios:
+  - flow:
+      - get:
+          url: "/fibonacci.php"

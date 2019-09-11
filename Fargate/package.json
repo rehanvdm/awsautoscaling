@@ -1,0 +1,13 @@
+{
+  "name": "fargate",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "deploy": "aws --profile rehan cloudformation  deploy --template-file cf.yaml --stack-name fargate-auto-scaling --capabilities CAPABILITY_NAMED_IAM",
+    "describe_stack": "aws --profile rehan cloudformation  describe-stacks --stack-name fargate-auto-scaling --output table",
+    "create_change_set": "aws --profile rehan cloudformation  create-change-set --change-set-name change-set-1 --template-body file://cf.yaml --stack-name fargate-auto-scaling --capabilities CAPABILITY_NAMED_IAM"
+  },
+  "author": "",
+  "license": "ISC"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "loadtester",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "loadtest": "artillery run loadtest.yaml"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "artillery": "^1.6.0-28"
+  }
+}
